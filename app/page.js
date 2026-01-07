@@ -42,7 +42,7 @@ export default function Home() {
     if (!session) return;
 
     try {
-      const res = await fetch("http://localhost:3003/", {
+      const res = await fetch("https://backend4todo.onrender.com/", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (!res.ok) {
@@ -65,7 +65,7 @@ export default function Home() {
   // -------- TODO HANDLERS --------
   async function Post() {
     if (!todo.trim()) return setreply("Please enter a todo.");
-    const res = await fetch("http://localhost:3003/", {
+    const res = await fetch("https://backend4todo.onrender.com/", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -81,7 +81,7 @@ export default function Home() {
   }
 
   async function PUT(id) {
-    const res = await fetch("http://localhost:3003/", {
+    const res = await fetch("https://backend4todo.onrender.com/", {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
@@ -98,7 +98,7 @@ export default function Home() {
   }
 
   async function Delete(id) {
-    const res = await fetch("http://localhost:3003/", {
+    const res = await fetch("https://backend4todo.onrender.com/", {
       method: "DELETE",
       headers: {
         "Content-Type": "application/json",
@@ -114,7 +114,7 @@ export default function Home() {
 
   async function toggleCompleted(id, newValue) {
     try {
-      await fetch("http://localhost:3003/", {
+      await fetch("https://backend4todo.onrender.com/", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
