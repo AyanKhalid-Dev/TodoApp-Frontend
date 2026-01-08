@@ -274,11 +274,16 @@
 //   );
 // }
 
-
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "./components/Client";
+import { createClient } from "@supabase/supabase-js";
+
+// -------- Supabase Client --------
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 export default function Home() {
   const [session, setSession] = useState(null);
@@ -287,51 +292,55 @@ export default function Home() {
   const [reply, setreply] = useState("");
   const [editingid, seteditingid] = useState(null);
   const [editingvalue, seteditingvalue] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
 
-  // ================= SESSION =================
+  // ---------- SESSION TRACKING ----------
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    async function fetchSession() {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+      if (data.session) await fetchTodos(data.session);
+    }
+    fetchSession();
 
-    const { subscription } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => setSession(newSession)
-    );
+    const { subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      if (newSession) fetchTodos(newSession);
+      else settodos([]);
+    });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // ================= FETCH TODOS =================
-  useEffect(() => {
-    if (!session?.access_token) return;
+  // ---------- GET TODOS ----------
+  async function fetchTodos(currentSession) {
+    const activeSession = currentSession || session;
+    if (!activeSession) return;
 
-    fetchTodos();
-  }, [session]);
-
-  async function fetchTodos() {
     try {
       const res = await fetch("https://backend4todo.onrender.com/", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${activeSession.access_token}` },
       });
       if (!res.ok) return settodos([]);
       const data = await res.json();
-      if (data?.data) settodos(data.data);
+      settodos(data.data || []);
     } catch {
       settodos([]);
     }
   }
 
-  // ================= ADD TODO =================
+  // ---------- ADD TODO ----------
   async function Post() {
-    if (!todo.trim()) return;
+    if (!todo.trim()) return setreply("Please enter a todo.");
 
-    // temporary ID for instant UI
-    const tempId = crypto.randomUUID();
-    const tempTodo = { id: tempId, todo, isCompleted: false };
+    const tempTodo = { id: Date.now(), todo, isCompleted: false };
     settodos((prev) => [tempTodo, ...prev]);
     settodo("");
+    setLoading(true);
 
     try {
       const res = await fetch("https://backend4todo.onrender.com/", {
@@ -343,32 +352,32 @@ export default function Home() {
         body: JSON.stringify({ todo }),
       });
       const data = await res.json();
-
-      // Replace temp ID with backend ID
-      if (data?.data) {
-        settodos((prev) =>
-          prev.map((t) => (t.id === tempId ? data.data[data.data.length - 1] : t))
-        );
-      }
+      settodos((prev) =>
+        prev.map((t) => (t.id === tempTodo.id ? data.data : t))
+      );
+      setreply("Added successfully");
     } catch (err) {
-      // rollback on error
-      settodos((prev) => prev.filter((t) => t.id !== tempId));
       console.error(err);
+      settodos((prev) => prev.filter((t) => t.id !== tempTodo.id));
+      setreply("Failed to add todo");
+    } finally {
+      setLoading(false);
     }
   }
 
-  // ================= UPDATE =================
+  // ---------- UPDATE TODO ----------
   async function PUT(id) {
-    const oldTodos = [...todos];
+    if (!editingvalue.trim()) return setreply("Please enter a todo.");
+
+    const prevTodos = [...todos];
     settodos((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, todo: editingvalue || "" } : t))
+      prev.map((t) => (t.id === id ? { ...t, todo: editingvalue } : t))
     );
+    setEditing(false);
 
-    seteditingid(null);
-    seteditingvalue("");
-
+    setLoading(true);
     try {
-      const res = await fetch("https://backend4todo.onrender.com/", {
+      await fetch("https://backend4todo.onrender.com/", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -376,19 +385,26 @@ export default function Home() {
         },
         body: JSON.stringify({ id, newTodo: editingvalue }),
       });
-      if (!res.ok) settodos(oldTodos); // rollback
-    } catch {
-      settodos(oldTodos);
+      setreply("Updated successfully");
+    } catch (err) {
+      console.error(err);
+      settodos(prevTodos);
+      setreply("Failed to update todo");
+    } finally {
+      setLoading(false);
+      seteditingid(null);
+      seteditingvalue("");
     }
   }
 
-  // ================= DELETE =================
+  // ---------- DELETE TODO ----------
   async function Delete(id) {
-    const oldTodos = [...todos];
+    const prevTodos = [...todos];
     settodos((prev) => prev.filter((t) => t.id !== id));
+    setLoading(true);
 
     try {
-      const res = await fetch("https://backend4todo.onrender.com/", {
+      await fetch("https://backend4todo.onrender.com/", {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
@@ -396,35 +412,40 @@ export default function Home() {
         },
         body: JSON.stringify({ id }),
       });
-      if (!res.ok) settodos(oldTodos); // rollback
-    } catch {
-      settodos(oldTodos);
+      setreply("Deleted successfully");
+    } catch (err) {
+      console.error(err);
+      settodos(prevTodos);
+      setreply("Failed to delete todo");
+    } finally {
+      setLoading(false);
     }
   }
 
-  // ================= TOGGLE =================
-  async function toggleCompleted(id, value) {
-    const oldTodos = [...todos];
+  // ---------- TOGGLE COMPLETED ----------
+  async function toggleCompleted(id, newValue) {
+    const prevTodos = [...todos];
     settodos((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, isCompleted: value } : t))
+      prev.map((t) => (t.id === id ? { ...t, isCompleted: newValue } : t))
     );
 
     try {
-      const res = await fetch("https://backend4todo.onrender.com/", {
+      await fetch("https://backend4todo.onrender.com/", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ id, isCompleted: value }),
+        body: JSON.stringify({ id, isCompleted: newValue }),
       });
-      if (!res.ok) settodos(oldTodos); // rollback
-    } catch {
-      settodos(oldTodos);
+    } catch (err) {
+      console.error(err);
+      settodos(prevTodos);
+      setreply("Failed to toggle todo");
     }
   }
 
-  // ================= AUTH =================
+  // ---------- AUTH ----------
   async function loginWithGoogle() {
     await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -433,24 +454,36 @@ export default function Home() {
   }
 
   async function loginWithEmail() {
+    setAuthError("");
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return setAuthError(error.message);
     setSession(data.session);
+    fetchTodos(data.session);
   }
 
   async function signupWithEmail() {
+    setAuthError("");
     const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) return setAuthError(error.message);
     setSession(data.session);
+    fetchTodos(data.session);
   }
 
   async function logout() {
     await supabase.auth.signOut();
     setSession(null);
     settodos([]);
+    setEmail("");
+    setPassword("");
+    setAuthError("");
   }
 
-  // ================= UI =================
+  const setEditing = (val) => {
+    seteditingid(null);
+    seteditingvalue("");
+  };
+
+  // ---------- UI ----------
   if (!session) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-4 bg-gray-100 dark:bg-gray-900">
@@ -458,29 +491,40 @@ export default function Home() {
           <input
             type="email"
             placeholder="Email"
-            value={email || ""}
+            value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="px-4 py-2 rounded border border-gray-300 dark:border-gray-700"
+            className="px-4 py-2 rounded border border-gray-300 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
           />
           <input
             type="password"
             placeholder="Password"
-            value={password || ""}
+            value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="px-4 py-2 rounded border border-gray-300 dark:border-gray-700"
+            className="px-4 py-2 rounded border border-gray-300 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
           />
-          <div className="flex gap-3">
-            <button onClick={loginWithEmail} className="flex-1 bg-blue-600 text-white rounded-lg">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={loginWithEmail}
+              className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            >
               Login
             </button>
-            <button onClick={signupWithEmail} className="flex-1 bg-green-600 text-white rounded-lg">
+            <button
+              onClick={signupWithEmail}
+              className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
+            >
               Sign Up
             </button>
           </div>
-          {authError && <p className="text-red-500">{authError}</p>}
+          {authError && <p className="text-red-500 text-center">{authError}</p>}
         </div>
 
-        <button onClick={loginWithGoogle} className="px-6 py-3 bg-black text-white rounded-lg">
+        <div className="text-gray-400">or</div>
+
+        <button
+          onClick={loginWithGoogle}
+          className="px-6 py-3 bg-black text-white rounded-lg hover:scale-105 transform transition"
+        >
           Sign in with Google
         </button>
       </div>
@@ -490,44 +534,88 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-100 dark:bg-gray-900 p-4 flex justify-center">
       <div className="w-full max-w-2xl space-y-6">
-        {/* HEADER */}
-        <div className="flex justify-between items-center">
-          <h1 className="text-3xl font-bold">📝 Todo Dashboard</h1>
-          <button onClick={logout} className="bg-red-600 text-white px-4 py-2 rounded">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">📝 Todo Dashboard</h1>
+          <button
+            onClick={logout}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+          >
             Logout
           </button>
         </div>
 
-        {/* ADD */}
-        <div className="bg-white dark:bg-gray-800 p-4 rounded-xl">
-          <div className="flex gap-3">
+        {/* Add Todo */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
-              value={editingid ? editingvalue || "" : todo || ""}
+              type="text"
+              value={editingid ? editingvalue : todo}
               onChange={(e) =>
                 editingid ? seteditingvalue(e.target.value) : settodo(e.target.value)
               }
-              className="flex-1 border px-4 py-2 rounded"
               placeholder="What needs to be done?"
+              className="flex-1 px-4 py-2 rounded border border-gray-300 dark:border-gray-700 bg-transparent text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-            <button onClick={() => (editingid ? PUT(editingid) : Post())} className="bg-blue-600 text-white px-5 rounded">
-              {editingid ? "Update" : "Add"}
+            <button
+              onClick={() => (editingid ? PUT(editingid) : todo.trim() && Post())}
+              className={`px-5 py-2 text-white rounded-lg transition ${
+                loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+              }`}
+              disabled={loading}
+            >
+              {loading ? "Processing..." : editingid ? "Update" : "Add"}
             </button>
           </div>
         </div>
 
-        {/* LIST */}
-        {todos.map((item) => (
-          <div key={item.id} className="bg-white dark:bg-gray-800 p-4 rounded-xl flex justify-between">
-            <div className="flex gap-3">
-              <input type="checkbox" checked={item.isCompleted} onChange={() => toggleCompleted(item.id, !item.isCompleted)} />
-              <span className={item.isCompleted ? "line-through" : ""}>{item.todo}</span>
+        {/* Todos List */}
+        <div className="space-y-3">
+          {todos?.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-col sm:flex-row justify-between items-center p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm"
+            >
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <input
+                  type="checkbox"
+                  checked={item.isCompleted}
+                  onChange={() => toggleCompleted(item.id, !item.isCompleted)}
+                  className="w-5 h-5"
+                />
+                <span
+                  className={`text-gray-900 dark:text-white break-words ${
+                    item.isCompleted ? "line-through text-gray-400 dark:text-gray-500" : ""
+                  }`}
+                >
+                  {item.todo}
+                </span>
+              </div>
+
+              <div className="flex gap-2 mt-2 sm:mt-0">
+                <button
+                  onClick={() => {
+                    seteditingid(item.id);
+                    seteditingvalue(item.todo);
+                  }}
+                  className="px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 transition"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => Delete(item.id)}
+                  className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => { seteditingid(item.id); seteditingvalue(item.todo); }} className="bg-yellow-500 text-white px-3 rounded">Edit</button>
-              <button onClick={() => Delete(item.id)} className="bg-red-600 text-white px-3 rounded">Delete</button>
-            </div>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        {reply && (
+          <div className="text-center mt-4 text-gray-900 dark:text-white font-medium">{reply}</div>
+        )}
       </div>
     </div>
   );
