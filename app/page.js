@@ -16,36 +16,41 @@
 //   const [reply, setreply] = useState("");
 //   const [editingid, seteditingid] = useState(null);
 //   const [editingvalue, seteditingvalue] = useState("");
+//   const [loading, setLoading] = useState(false);
 
 //   const [email, setEmail] = useState("");
 //   const [password, setPassword] = useState("");
 //   const [authError, setAuthError] = useState("");
 
+//   // ---------- SESSION TRACKING ----------
 //   useEffect(() => {
 //     async function fetchSession() {
 //       const { data } = await supabase.auth.getSession();
 //       setSession(data.session);
+//       if (data.session) await fetchTodos(data.session);
 //     }
 //     fetchSession();
 
 //     const { subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
 //       setSession(newSession);
+//       if (newSession) fetchTodos(newSession);
+//       else settodos([]);
 //     });
 
 //     return () => subscription.unsubscribe();
 //   }, []);
+//   // https://backend4todo.onrender.com/
 
-//   async function Get() {
-//     if (!session) return;
+//   // ---------- GET TODOS ----------
+//   async function fetchTodos(currentSession) {
+//     const activeSession = currentSession || session;
+//     if (!activeSession) return;
 
 //     try {
 //       const res = await fetch("https://backend4todo.onrender.com/", {
-//         headers: { Authorization: `Bearer ${session.access_token}` },
+//         headers: { Authorization: `Bearer ${activeSession.access_token}` },
 //       });
-//       if (!res.ok) {
-//         settodos([]);
-//         return;
-//       }
+//       if (!res.ok) return settodos([]);
 //       const data = await res.json();
 //       settodos(data.data || []);
 //     } catch {
@@ -53,63 +58,119 @@
 //     }
 //   }
 
-//   useEffect(() => {
-//     Get();
-//   }, [session]);
-
+//   // ---------- ADD TODO ----------
 //   async function Post() {
 //     if (!todo.trim()) return setreply("Please enter a todo.");
-//     const res = await fetch("https://backend4todo.onrender.com/", {
-//       method: "POST",
-//       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-//       body: JSON.stringify({ todo }),
-//     });
-//     const data = await res.json();
-//     settodos(data.data || []);
+
+//     const tempTodo = { id: Date.now(), todo, isCompleted: false };
+//     settodos((prev) => [tempTodo, ...prev]);
 //     settodo("");
-//     setreply(data.message || "");
-//     await Get();
-//   }
+//     setLoading(true);
 
-//   async function PUT(id) {
-//     const res = await fetch("https://backend4todo.onrender.com/", {
-//       method: "PUT",
-//       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-//       body: JSON.stringify({ id, newTodo: editingvalue }),
-//     });
-//     const data = await res.json();
-//     settodos(data.data || []);
-//     setreply(data.message || "");
-//     seteditingid(null);
-//     seteditingvalue("");
-//     await Get();
-//   }
-
-//   async function Delete(id) {
-//     const res = await fetch("https://backend4todo.onrender.com/", {
-//       method: "DELETE",
-//       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-//       body: JSON.stringify({ id }),
-//     });
-//     const data = await res.json();
-//     settodos(data.data || []);
-//     setreply(data.message || "");
-//     await Get();
-//   }
-
-//   async function toggleCompleted(id, newValue) {
 //     try {
-//       await fetch("https://backend4todo.onrender.com/", {
-//         method: "PATCH",
-//         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-//         body: JSON.stringify({ id, isCompleted: newValue }),
+//       const res = await fetch("https://backend4todo.onrender.com/", {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           Authorization: `Bearer ${session.access_token}`,
+//         },
+//         body: JSON.stringify({ todo }),
 //       });
-//       settodos(todos.map((t) => (t.id === id ? { ...t, isCompleted: newValue } : t)));
+//       const data = await res.json();
+//       settodos((prev) =>
+//         prev.map((t) => (t.id === tempTodo.id ? data.data : t))
+//       );
+//       setreply("Added successfully");
 //     } catch (err) {
 //       console.error(err);
+//       settodos((prev) => prev.filter((t) => t.id !== tempTodo.id));
+//       setreply("Failed to add todo");
+//     } finally {
+//       setLoading(false);
 //     }
 //   }
 
+//   // ---------- UPDATE TODO ----------
+//   async function PUT(id) {
+//     if (!editingvalue.trim()) return setreply("Please enter a todo.");
+
+//     const prevTodos = [...todos];
+//     settodos((prev) =>
+//       prev.map((t) => (t.id === id ? { ...t, todo: editingvalue } : t))
+//     );
+//     setEditing(false);
+
+//     setLoading(true);
+//     try {
+//       await fetch("https://backend4todo.onrender.com/", {
+//         method: "PUT",
+//         headers: {
+//           "Content-Type": "application/json",
+//           Authorization: `Bearer ${session.access_token}`,
+//         },
+//         body: JSON.stringify({ id, newTodo: editingvalue }),
+//       });
+//       setreply("Updated successfully");
+//     } catch (err) {
+//       console.error(err);
+//       settodos(prevTodos);
+//       setreply("Failed to update todo");
+//     } finally {
+//       setLoading(false);
+//       seteditingid(null);
+//       seteditingvalue("");
+//     }
+//   }
+
+//   // ---------- DELETE TODO ----------
+//   async function Delete(id) {
+//     const prevTodos = [...todos];
+//     settodos((prev) => prev.filter((t) => t.id !== id));
+//     setLoading(true);
+
+//     try {
+//       await fetch("https://backend4todo.onrender.com/", {
+//         method: "DELETE",
+//         headers: {
+//           "Content-Type": "application/json",
+//           Authorization: `Bearer ${session.access_token}`,
+//         },
+//         body: JSON.stringify({ id }),
+//       });
+//       setreply("Deleted successfully");
+//     } catch (err) {
+//       console.error(err);
+//       settodos(prevTodos);
+//       setreply("Failed to delete todo");
+//     } finally {
+//       setLoading(false);
+//     }
+//   }
+
+//   // ---------- TOGGLE COMPLETED ----------
+//   async function toggleCompleted(id, newValue) {
+//     const prevTodos = [...todos];
+//     settodos((prev) =>
+//       prev.map((t) => (t.id === id ? { ...t, isCompleted: newValue } : t))
+//     );
+
+//     try {
+//       await fetch("https://backend4todo.onrender.com/", {
+//         method: "PATCH",
+//         headers: {
+//           "Content-Type": "application/json",
+//           Authorization: `Bearer ${session.access_token}`,
+//         },
+//         body: JSON.stringify({ id, isCompleted: newValue }),
+//       });
+//     } catch (err) {
+//       console.error(err);
+//       settodos(prevTodos);
+//       setreply("Failed to toggle todo");
+//     }
+//   }
+
+//   // ---------- AUTH ----------
 //   async function loginWithGoogle() {
 //     await supabase.auth.signInWithOAuth({
 //       provider: "google",
@@ -122,6 +183,7 @@
 //     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 //     if (error) return setAuthError(error.message);
 //     setSession(data.session);
+//     fetchTodos(data.session);
 //   }
 
 //   async function signupWithEmail() {
@@ -129,6 +191,7 @@
 //     const { data, error } = await supabase.auth.signUp({ email, password });
 //     if (error) return setAuthError(error.message);
 //     setSession(data.session);
+//     fetchTodos(data.session);
 //   }
 
 //   async function logout() {
@@ -140,6 +203,12 @@
 //     setAuthError("");
 //   }
 
+//   const setEditing = (val) => {
+//     seteditingid(null);
+//     seteditingvalue("");
+//   };
+
+//   // ---------- UI ----------
 //   if (!session) {
 //     return (
 //       <div className="min-h-screen flex flex-col items-center justify-center gap-6 px-4 bg-gray-100 dark:bg-gray-900">
@@ -215,9 +284,12 @@
 //             />
 //             <button
 //               onClick={() => (editingid ? PUT(editingid) : todo.trim() && Post())}
-//               className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+//               className={`px-5 py-2 text-white rounded-lg transition ${
+//                 loading ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+//               }`}
+//               disabled={loading}
 //             >
-//               {editingid ? "Update" : "Add"}
+//               {loading ? "Processing..." : editingid ? "Update" : "Add"}
 //             </button>
 //           </div>
 //         </div>
@@ -299,151 +371,176 @@ export default function Home() {
   const [authError, setAuthError] = useState("");
 
   // ---------- SESSION TRACKING ----------
-  useEffect(() => {
-    async function fetchSession() {
-      const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-      if (data.session) await fetchTodos(data.session);
-    }
-    fetchSession();
+// Session tracking
+useEffect(() => {
+  async function fetchSession() {
+    const { data } = await supabase.auth.getSession();
+    setSession(data.session);
+  }
+  fetchSession();
 
-    const { subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      if (newSession) fetchTodos(newSession);
-      else settodos([]);
-    });
+  const { subscription } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    setSession(newSession);
+  });
 
-    return () => subscription.unsubscribe();
-  }, []);
+  return () => subscription.unsubscribe();
+}, []);
+
+// Fetch todos whenever session changes
+useEffect(() => {
+  if (session) {
+    fetchTodos();
+  } else {
+    settodos([]);
+  }
+}, [session]); // ✅ This runs whenever session changes
 
   // ---------- GET TODOS ----------
-  async function fetchTodos(currentSession) {
-    const activeSession = currentSession || session;
-    if (!activeSession) return;
-
-    try {
-      const res = await fetch("https://backend4todo.onrender.com/", {
-        headers: { Authorization: `Bearer ${activeSession.access_token}` },
-      });
-      if (!res.ok) return settodos([]);
-      const data = await res.json();
-      settodos(data.data || []);
-    } catch {
-      settodos([]);
-    }
+async function fetchTodos() {
+  if (!session) return;
+  
+  const { data, error } = await supabase
+    .from("TodosTable")
+    .select("*")
+    .order("id", { ascending: false });
+    
+  if (error) {
+    console.error(error);
+    return settodos([]);
   }
+  settodos(data || []);
+}
 
   // ---------- ADD TODO ----------
-  async function Post() {
-    if (!todo.trim()) return setreply("Please enter a todo.");
+async function Post() {
+  if (!todo.trim()) return setreply("Please enter a todo.");
 
-    const tempTodo = { id: Date.now(), todo, isCompleted: false };
-    settodos((prev) => [tempTodo, ...prev]);
-    settodo("");
-    setLoading(true);
+  const tempTodo = { id: Date.now(), todo, isCompleted: false };
+  settodos((prev) => [tempTodo, ...prev]); 
+  settodo("");
+  setLoading(true);
 
-    try {
-      const res = await fetch("https://backend4todo.onrender.com/", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ todo }),
-      });
-      const data = await res.json();
-      settodos((prev) =>
-        prev.map((t) => (t.id === tempTodo.id ? data.data : t))
-      );
-      setreply("Added successfully");
-    } catch (err) {
-      console.error(err);
-      settodos((prev) => prev.filter((t) => t.id !== tempTodo.id));
-      setreply("Failed to add todo");
-    } finally {
-      setLoading(false);
-    }
+  try {
+    const { data, error } = await supabase
+      .from("TodosTable")
+      .insert([{ todo, user_id: session.user.id, isCompleted: false }])
+      .select()
+      .single();
+      
+    if (error) throw error;
+    
+    settodos((prev) =>
+      prev.map((t) => (t.id === tempTodo.id ? data : t))
+    );
+    setreply("Added successfully");
+  } catch (err) {
+    console.error(err);
+    settodos((prev) => prev.filter((t) => t.id !== tempTodo.id));
+    setreply("Failed to add todo");
+  } finally {
+    setLoading(false);
   }
+}
+
+// async function Post() {
+//   if (!todo.trim()) return setreply("Please enter a todo.");
+  
+//   setLoading(true);  // Loading dikha do
+  
+//   try {
+//     const { data, error } = await supabase
+//       .from("TodosTable")
+//       .insert([{ todo, user_id: session.user.id, isCompleted: false }])
+//       .select()
+//       .single();
+      
+//     if (error) throw error;
+    
+//     settodos((prev) => [data, ...prev]);  // Seedha add karo
+//     settodo("")
+//     setreply("Added successfully");
+//   } catch (err) {
+//     setreply("Failed to add todo");
+//   } finally {
+//     setLoading(false);
+//   }
+// }
+
 
   // ---------- UPDATE TODO ----------
-  async function PUT(id) {
-    if (!editingvalue.trim()) return setreply("Please enter a todo.");
+async function PUT(id) {
+  if (!editingvalue.trim()) return setreply("Please enter a todo.");
 
-    const prevTodos = [...todos];
-    settodos((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, todo: editingvalue } : t))
-    );
-    setEditing(false);
+  const prevTodos = [...todos];
+  settodos((prev) =>
+    prev.map((t) => (t.id === id ? { ...t, todo: editingvalue } : t))
+  );
+  setEditing(false);
+  setLoading(true);
 
-    setLoading(true);
-    try {
-      await fetch("https://backend4todo.onrender.com/", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ id, newTodo: editingvalue }),
-      });
-      setreply("Updated successfully");
-    } catch (err) {
-      console.error(err);
-      settodos(prevTodos);
-      setreply("Failed to update todo");
-    } finally {
-      setLoading(false);
-      seteditingid(null);
-      seteditingvalue("");
-    }
+  try {
+    const { error } = await supabase
+      .from("TodosTable")
+      .update({ todo: editingvalue })
+      .eq("id", id);
+      
+    if (error) throw error;
+    setreply("Updated successfully");
+  } catch (err) {
+    console.error(err);
+    settodos(prevTodos);
+    setreply("Failed to update todo");
+  } finally {
+    setLoading(false);
+    seteditingid(null);
+    seteditingvalue("");
   }
+}
+
 
   // ---------- DELETE TODO ----------
-  async function Delete(id) {
-    const prevTodos = [...todos];
-    settodos((prev) => prev.filter((t) => t.id !== id));
-    setLoading(true);
+async function Delete(id) {
+  const prevTodos = [...todos];
+  settodos((prev) => prev.filter((t) => t.id !== id));
+  setLoading(true);
 
-    try {
-      await fetch("https://backend4todo.onrender.com/", {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ id }),
-      });
-      setreply("Deleted successfully");
-    } catch (err) {
-      console.error(err);
-      settodos(prevTodos);
-      setreply("Failed to delete todo");
-    } finally {
-      setLoading(false);
-    }
+  try {
+    const { error } = await supabase
+      .from("TodosTable")
+      .delete()
+      .eq("id", id);
+      
+    if (error) throw error;
+    setreply("Deleted successfully");
+  } catch (err) {
+    console.error(err);
+    settodos(prevTodos);
+    setreply("Failed to delete todo");
+  } finally {
+    setLoading(false);
   }
+}
 
   // ---------- TOGGLE COMPLETED ----------
-  async function toggleCompleted(id, newValue) {
-    const prevTodos = [...todos];
-    settodos((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, isCompleted: newValue } : t))
-    );
+async function toggleCompleted(id, newValue) {
+  const prevTodos = [...todos];
+  settodos((prev) =>
+    prev.map((t) => (t.id === id ? { ...t, isCompleted: newValue } : t))
+  );
 
-    try {
-      await fetch("https://backend4todo.onrender.com/", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ id, isCompleted: newValue }),
-      });
-    } catch (err) {
-      console.error(err);
-      settodos(prevTodos);
-      setreply("Failed to toggle todo");
-    }
+  try {
+    const { error } = await supabase
+      .from("TodosTable")
+      .update({ isCompleted: newValue })
+      .eq("id", id);
+      
+    if (error) throw error;
+  } catch (err) {
+    console.error(err);
+    settodos(prevTodos);
+    setreply("Failed to toggle todo");
   }
+}
 
   // ---------- AUTH ----------
   async function loginWithGoogle() {
@@ -620,6 +717,10 @@ export default function Home() {
     </div>
   );
 }
+
+
+
+
 
 
 
